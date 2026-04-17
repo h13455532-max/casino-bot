@@ -1,4 +1,4 @@
-# bot.py — MEGA CASINO PRO v3.0 (Production)
+# bot.py — MEGA CASINO PRO v3.1 (Production)
 import telebot, sqlite3, random, threading, time, os, logging, io, math
 from telebot import types
 from flask import Flask
@@ -133,25 +133,63 @@ def log_to_channel(text, photo_path=None):
 # ════════════════════════════════════════════
 #  ГЕНЕРАЦИЯ КАРТИНОК (PIL)
 # ════════════════════════════════════════════
-def make_win_image(username: str, amount: float, game_name: str) -> io.BytesIO:
-    """Красивая картинка ПОБЕДЫ"""
-    W, H = 1080, 1080
-    img = Image.new("RGB", (W, H), (10, 15, 35))
-    draw = ImageDraw.Draw(img)
+
+def make_rounded_image(img, radius=40):
+    """Делает картинку с закругленными углами"""
+    img = img.convert("RGBA")
+    mask = Image.new("L", img.size, 0)
+    draw_mask = ImageDraw.Draw(mask)
+    draw_mask.rounded_rectangle([0, 0, img.size[0], img.size[1]], radius=radius, fill=255)
+    img.putalpha(mask)
+    return img
+
+def get_avatar_circle(user_id, size=100):
+    """Получает аватарку пользователя в виде круга"""
+    try:
+        photos = bot.get_user_profile_photos(user_id, limit=1)
+        if photos.photos:
+            file_info = bot.get_file(photos.photos[0][0].file_id)
+            downloaded_file = bot.download_file(file_info.file_path)
+            avatar = Image.open(io.BytesIO(downloaded_file))
+            avatar = avatar.resize((size, size), Image.Resampling.LANCZOS)
+            
+            # Делаем круглую маску
+            mask = Image.new("L", (size, size), 0)
+            draw_mask = ImageDraw.Draw(mask)
+            draw_mask.ellipse([0, 0, size, size], fill=255)
+            avatar.putalpha(mask)
+            
+            return avatar
+    except:
+        pass
     
-    # Градиентный фон
+    # Если не получилось — возвращаем иконку
+    return None
+
+def make_win_image(username: str, amount: float, game_name: str, user_id: int = None) -> io.BytesIO:
+    """Красивая картинка ПОБЕДЫ с закругленными углами"""
+    W, H = 1080, 1080
+    img = Image.new("RGBA", (W, H), (10, 15, 35, 0))
+    
+    # Фон с градиентом
+    bg = Image.new("RGB", (W, H), (10, 15, 35))
+    draw_bg = ImageDraw.Draw(bg)
     for y in range(H):
         ratio = y / H
         r = int(10 + 30 * ratio)
         g = int(15 + 40 * ratio)
         b = int(35 + 80 * ratio)
-        draw.line([(0, y), (W, y)], fill=(r, g, b))
+        draw_bg.line([(0, y), (W, y)], fill=(r, g, b))
     
-    # Рамка
-    draw.rounded_rectangle([30, 30, W-30, H-30], radius=40,
-                          outline=(0, 255, 100), width=6)
+    # Рамка на фоне
+    draw_bg.rounded_rectangle([30, 30, W-30, H-30], radius=40,
+                              outline=(0, 255, 100), width=6)
     
-    # Закругленные углы для внутреннего контента
+    # Применяем фон
+    img.paste(bg, (0, 0))
+    draw = ImageDraw.Draw(img)
+    
+    # Закругленный контейнер результата
     draw.rounded_rectangle([60, 60, W-60, H-60], radius=35,
                           outline=(0, 200, 100), width=3)
     
@@ -159,41 +197,61 @@ def make_win_image(username: str, amount: float, game_name: str) -> io.BytesIO:
     draw.rectangle([60, 60, W-60, 250], fill=(15, 30, 60))
     draw.text((W//2-120, 100), "🎉 ПОБЕДА! 🎉", fill=(0, 255, 100))
     
-    # СЕРЕДИНА: сумма выигрыша (БОЛЬШОЙ)
-    draw.text((W//2-200, 300), f"+ ${amount:.2f}", fill=(0, 255, 100))
+    # Аватар игрока (если есть)
+    if user_id:
+        avatar = get_avatar_circle(user_id, size=120)
+        if avatar:
+            img.paste(avatar, (W//2 - 60, 280), mask=avatar)
+        else:
+            draw.ellipse([W//2-60, 280, W//2+60, 400], fill=(40, 30, 80), outline=(0, 255, 100), width=3)
+            draw.text((W//2-25, 330), "👤", fill=(200, 180, 255))
+    else:
+        draw.ellipse([W//2-60, 280, W//2+60, 400], fill=(40, 30, 80), outline=(0, 255, 100), width=3)
+        draw.text((W//2-25, 330), "👤", fill=(200, 180, 255))
+    
+    # СУММА ВЫИГРЫША (БОЛЬШОЙ)
+    draw.text((W//2-200, 450), f"+ ${amount:.2f}", fill=(0, 255, 100))
     
     # ИГРА
-    draw.text((W//2-150, 500), f"{game_name}", fill=(150, 200, 255))
+    draw.text((W//2-150, 600), f"{game_name}", fill=(150, 200, 255))
     
     # ИГРОК
-    draw.text((W//2-180, 650), f"Игрок: {username[:20]}", fill=(200, 200, 255))
+    draw.text((W//2-180, 720), f"Игрок: {username[:20]}", fill=(200, 200, 255))
     
     # НИЖНЯЯ ПОЛОСА
     draw.rectangle([60, 850, W-60, 950], fill=(0, 100, 50))
-    draw.text((W//2-150, 880), "MEGA CASINO", fill=(0, 255, 100))
+    draw.text((W//2-150, 880), CASINO_NAME, fill=(0, 255, 100))
+    
+    # Применяем закругленные углы ко всей картинке
+    img = make_rounded_image(img, radius=40)
     
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
     return buf
 
-def make_lose_image(username: str, amount: float, game_name: str) -> io.BytesIO:
-    """Красивая картинка ПРОИГРЫША"""
+def make_lose_image(username: str, amount: float, game_name: str, user_id: int = None) -> io.BytesIO:
+    """Красивая картинка ПРОИГРЫША с закругленными углами"""
     W, H = 1080, 1080
-    img = Image.new("RGB", (W, H), (35, 10, 10))
-    draw = ImageDraw.Draw(img)
+    img = Image.new("RGBA", (W, H), (35, 10, 10, 0))
     
-    # Градиентный фон (красный)
+    # Фон с градиентом (красный)
+    bg = Image.new("RGB", (W, H), (35, 10, 10))
+    draw_bg = ImageDraw.Draw(bg)
     for y in range(H):
         ratio = y / H
         r = int(35 + 50 * ratio)
         g = int(10 + 10 * ratio)
         b = int(10 + 20 * ratio)
-        draw.line([(0, y), (W, y)], fill=(r, g, b))
+        draw_bg.line([(0, y), (W, y)], fill=(r, g, b))
     
     # Рамка
-    draw.rounded_rectangle([30, 30, W-30, H-30], radius=40,
-                          outline=(255, 100, 100), width=6)
+    draw_bg.rounded_rectangle([30, 30, W-30, H-30], radius=40,
+                              outline=(255, 100, 100), width=6)
+    
+    img.paste(bg, (0, 0))
+    draw = ImageDraw.Draw(img)
+    
     draw.rounded_rectangle([60, 60, W-60, H-60], radius=35,
                           outline=(200, 100, 100), width=3)
     
@@ -201,41 +259,60 @@ def make_lose_image(username: str, amount: float, game_name: str) -> io.BytesIO:
     draw.rectangle([60, 60, W-60, 250], fill=(60, 30, 30))
     draw.text((W//2-120, 100), "❌ ПРОИГРЫШ ❌", fill=(255, 100, 100))
     
+    # Аватар
+    if user_id:
+        avatar = get_avatar_circle(user_id, size=120)
+        if avatar:
+            img.paste(avatar, (W//2 - 60, 280), mask=avatar)
+        else:
+            draw.ellipse([W//2-60, 280, W//2+60, 400], fill=(60, 30, 30), outline=(255, 100, 100), width=3)
+            draw.text((W//2-25, 330), "👤", fill=(255, 180, 180))
+    else:
+        draw.ellipse([W//2-60, 280, W//2+60, 400], fill=(60, 30, 30), outline=(255, 100, 100), width=3)
+        draw.text((W//2-25, 330), "👤", fill=(255, 180, 180))
+    
     # СУММА ПОТЕРИ
-    draw.text((W//2-180, 300), f"- ${amount:.2f}", fill=(255, 100, 100))
+    draw.text((W//2-180, 450), f"- ${amount:.2f}", fill=(255, 100, 100))
     
     # ИГРА
-    draw.text((W//2-150, 500), f"{game_name}", fill=(255, 150, 150))
+    draw.text((W//2-150, 600), f"{game_name}", fill=(255, 150, 150))
     
     # ИГРОК
-    draw.text((W//2-180, 650), f"Игрок: {username[:20]}", fill=(255, 200, 200))
+    draw.text((W//2-180, 720), f"Игрок: {username[:20]}", fill=(255, 200, 200))
     
     # НИЖНЯЯ ПОЛОСА
     draw.rectangle([60, 850, W-60, 950], fill=(100, 30, 30))
-    draw.text((W//2-150, 880), "MEGA CASINO", fill=(255, 100, 100))
+    draw.text((W//2-150, 880), CASINO_NAME, fill=(255, 100, 100))
+    
+    # Закругленные углы
+    img = make_rounded_image(img, radius=40)
     
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
     return buf
 
-def make_game_image(game_name: str, bet: float, username: str) -> io.BytesIO:
-    """Картинка ИГРА В ПРОЦЕССЕ"""
+def make_game_image(game_name: str, bet: float, username: str, user_id: int = None) -> io.BytesIO:
+    """Картинка ИГРА В ПРОЦЕССЕ с закругленными углами"""
     W, H = 1080, 1080
-    img = Image.new("RGB", (W, H), (15, 20, 40))
-    draw = ImageDraw.Draw(img)
+    img = Image.new("RGBA", (W, H), (15, 20, 40, 0))
     
-    # Градиент (синий)
+    # Фон (синий)
+    bg = Image.new("RGB", (W, H), (15, 20, 40))
+    draw_bg = ImageDraw.Draw(bg)
     for y in range(H):
         ratio = y / H
         r = int(15 + 20 * ratio)
         g = int(20 + 40 * ratio)
         b = int(40 + 80 * ratio)
-        draw.line([(0, y), (W, y)], fill=(r, g, b))
+        draw_bg.line([(0, y), (W, y)], fill=(r, g, b))
     
-    # Рамка
-    draw.rounded_rectangle([30, 30, W-30, H-30], radius=40,
-                          outline=(100, 150, 255), width=6)
+    draw_bg.rounded_rectangle([30, 30, W-30, H-30], radius=40,
+                              outline=(100, 150, 255), width=6)
+    
+    img.paste(bg, (0, 0))
+    draw = ImageDraw.Draw(img)
+    
     draw.rounded_rectangle([60, 60, W-60, H-60], radius=35,
                           outline=(150, 200, 255), width=3)
     
@@ -243,61 +320,86 @@ def make_game_image(game_name: str, bet: float, username: str) -> io.BytesIO:
     draw.rectangle([60, 60, W-60, 250], fill=(20, 30, 70))
     draw.text((W//2-180, 100), "🎮 ИГРА В ПРОЦЕССЕ 🎮", fill=(100, 200, 255))
     
+    # Аватар
+    if user_id:
+        avatar = get_avatar_circle(user_id, size=120)
+        if avatar:
+            img.paste(avatar, (W//2 - 60, 280), mask=avatar)
+        else:
+            draw.ellipse([W//2-60, 280, W//2+60, 400], fill=(20, 30, 70), outline=(100, 200, 255), width=3)
+            draw.text((W//2-25, 330), "👤", fill=(100, 200, 255))
+    else:
+        draw.ellipse([W//2-60, 280, W//2+60, 400], fill=(20, 30, 70), outline=(100, 200, 255), width=3)
+        draw.text((W//2-25, 330), "👤", fill=(100, 200, 255))
+    
     # НАЗВАНИЕ ИГРЫ
-    draw.text((W//2-200, 350), f"{game_name}", fill=(150, 220, 255))
+    draw.text((W//2-200, 450), f"{game_name}", fill=(150, 220, 255))
     
     # СТАВКА
-    draw.text((W//2-120, 500), f"СТАВКА: ${bet:.2f}", fill=(100, 255, 200))
+    draw.text((W//2-120, 600), f"СТАВКА: ${bet:.2f}", fill=(100, 255, 200))
     
     # ИГРОК
-    draw.text((W//2-180, 650), f"Игрок: {username[:20]}", fill=(180, 220, 255))
+    draw.text((W//2-180, 720), f"Игрок: {username[:20]}", fill=(180, 220, 255))
     
     # НИЖНЯЯ ПОЛОСА
     draw.rectangle([60, 850, W-60, 950], fill=(20, 40, 80))
-    draw.text((W//2-150, 880), "MEGA CASINO", fill=(100, 200, 255))
+    draw.text((W//2-150, 880), CASINO_NAME, fill=(100, 200, 255))
+    
+    # Закругленные углы
+    img = make_rounded_image(img, radius=40)
     
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
     return buf
 
-def make_profile_card(user: dict) -> io.BytesIO:
-    """Красивая профиль-карточка"""
+def make_profile_card(user: dict, user_id: int) -> io.BytesIO:
+    """Красивая профиль-карточка с аватаром"""
     W, H = 1080, 600
-    img = Image.new("RGB", (W, H), (10, 10, 25))
-    draw = ImageDraw.Draw(img)
+    img = Image.new("RGBA", (W, H), (10, 10, 25, 0))
     
-    # Градиент
+    # Фон
+    bg = Image.new("RGB", (W, H), (10, 10, 25))
+    draw_bg = ImageDraw.Draw(bg)
     for y in range(H):
         ratio = y / H
         r = int(10 + 40 * ratio)
         g = int(10 + 30 * ratio)
         b = int(25 + 100 * ratio)
-        draw.line([(0, y), (W, y)], fill=(r, g, b))
+        draw_bg.line([(0, y), (W, y)], fill=(r, g, b))
     
-    # Рамка
-    draw.rounded_rectangle([20, 20, W-20, H-20], radius=30,
-                          outline=(100, 80, 200), width=4)
+    draw_bg.rounded_rectangle([20, 20, W-20, H-20], radius=30,
+                              outline=(100, 80, 200), width=4)
     
-    # Левая часть — аватар
-    draw.ellipse([40, 80, 280, 320], fill=(40, 30, 80), outline=(150, 100, 200), width=3)
-    draw.text((130, 180), "👤", fill=(200, 180, 255))
+    img.paste(bg, (0, 0))
+    draw = ImageDraw.Draw(img)
+    
+    # Левая часть — аватар (с закругленными краями)
+    avatar = get_avatar_circle(user_id, size=200)
+    if avatar:
+        img.paste(avatar, (40, 80), mask=avatar)
+    else:
+        draw.ellipse([40, 80, 240, 280], fill=(40, 30, 80), outline=(150, 100, 200), width=3)
+        draw.text((130, 160), "👤", fill=(200, 180, 255))
     
     # Правая часть — инфо
-    draw.text((320, 60), f"{user['username']}", fill=(240, 230, 255))
-    draw.text((320, 120), f"ID: {user['id']}", fill=(150, 130, 200))
+    draw.text((280, 60), f"{user['username']}", fill=(240, 230, 255))
+    draw.text((280, 120), f"ID: {user['id']}", fill=(150, 130, 200))
     
     # Баланс
-    draw.text((320, 200), f"$ {user['balance']:.2f}", fill=(80, 255, 150))
-    draw.text((320, 260), f"Игр: {user['games']} | Побед: {user['wins']}", fill=(150, 200, 255))
+    draw.text((280, 180), f"$ {user['balance']:.4f}", fill=(80, 255, 150))
+    draw.text((280, 240), f"Игр: {user['games']} | Побед: {user['wins']}", fill=(150, 200, 255))
     
     wr = round(user['wins'] / user['games'] * 100, 1) if user['games'] else 0
     profit = user['total_won'] - user['total_bet']
     sign = "+" if profit >= 0 else ""
     
-    draw.text((320, 320), f"WR: {wr}% | Прибыль: {sign}${profit:.2f}", fill=(150, 200, 255))
+    draw.text((280, 300), f"WR: {wr}% | Прибыль: {sign}${profit:.2f}", fill=(150, 200, 255))
     
-    draw.text((320, 400), f"NEZZX x KLITOK CASINO", fill=(100, 200, 255))
+    draw.text((280, 400), CASINO_NAME, fill=(100, 200, 255))
+    
+    # Закругленные углы
+    img = make_rounded_image(img, radius=30)
     
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -418,11 +520,15 @@ def cmd_start(m):
         f"<b>🎰 {CASINO_NAME}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"Привет, <b>{m.from_user.first_name}!</b>\n\n"
-        f"Стартовый баланс: <b>0.00 $</b>\n"
-        f"Пополни счёт через крипто-ссылку чтобы начать играть!\n\n"
-        f"<a href='{CRYPTO_LINK}'>💰 Пополнить счёт</a>"
+        f"Твой баланс: <b>$0.00</b>\n\n"
+        f"Пополни счёт чтобы начать играть! 💳"
     )
-    bot.send_message(m.chat.id, text, reply_markup=kb_main())
+    
+    k = types.InlineKeyboardMarkup()
+    k.add(types.InlineKeyboardButton("💰 Пополнить", url=CRYPTO_LINK))
+    
+    bot.send_message(m.chat.id, text, reply_markup=k)
+    bot.send_message(m.chat.id, "Главное меню:", reply_markup=kb_main())
 
 # ════════════════════════════════════════════
 #  🎮 ИГРАТЬ
@@ -622,8 +728,7 @@ def _dice(m, uid, bet):
     mode = db.get_mode(uid)
     username = uname(m)
     
-    # Картинка процесса
-    img_buf = make_game_image("🎲 Кости", bet, username)
+    img_buf = make_game_image("🎲 Кости", bet, username, uid)
     bot.send_photo(m.chat.id, img_buf, caption=f"Бросаем кости...")
     
     dv = bot.send_dice(m.chat.id, emoji='🎲').dice.value
@@ -632,11 +737,11 @@ def _dice(m, uid, bet):
     if dv >= 4:
         profit = round(bet * 0.9, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎲 Кости")
+        img_buf = make_win_image(username, profit, "🎲 Кости", uid)
         log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Кости (выпало {dv})")
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🎲 Кости")
+        img_buf = make_lose_image(username, bet, "🎲 Кости", uid)
         log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Кости (выпало {dv})")
     
     bot.send_photo(m.chat.id, img_buf, 
@@ -653,7 +758,7 @@ def _coin(m, uid, bet):
         types.InlineKeyboardButton("🔵 Решка", callback_data=f"coin_{uid}_{bet}_t"),
     )
     username = uname(m)
-    img_buf = make_game_image("🪙 Монетка", bet, username)
+    img_buf = make_game_image("🪙 Монетка", bet, username, uid)
     bot.send_photo(m.chat.id, img_buf, caption="Выбери сторону:", reply_markup=k)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("coin_"))
@@ -675,11 +780,11 @@ def cb_coin(c):
     if won:
         profit = round(bet * 0.95, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🪙 Монетка")
+        img_buf = make_win_image(username, profit, "🪙 Монетка", uid)
         log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Монетку ({emoji})")
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🪙 Монетка")
+        img_buf = make_lose_image(username, bet, "🪙 Монетка", uid)
         log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Монетку ({emoji})")
     
     try:
@@ -698,17 +803,17 @@ def cb_coin(c):
 def _football(m, uid, bet):
     mode = db.get_mode(uid)
     username = uname(m)
-    img_buf = make_game_image("⚽ Футбол", bet, username)
+    img_buf = make_game_image("⚽ Футбол", bet, username, uid)
     bot.send_photo(m.chat.id, img_buf, caption="Бросаем...")
     dv = bot.send_dice(m.chat.id, emoji='⚽').dice.value
     time.sleep(4)
     if dv >= 4:
         profit = round(bet * 0.9, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "⚽ Футбол")
+        img_buf = make_win_image(username, profit, "⚽ Футбол", uid)
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "⚽ Футбол")
+        img_buf = make_lose_image(username, bet, "⚽ Футбол", uid)
     bot.send_photo(m.chat.id, img_buf,
                   caption=f"Счёт: {dv}/5\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("football", mode))
@@ -719,17 +824,17 @@ def _football(m, uid, bet):
 def _basket(m, uid, bet):
     mode = db.get_mode(uid)
     username = uname(m)
-    img_buf = make_game_image("🏀 Баскетбол", bet, username)
+    img_buf = make_game_image("🏀 Баскетбол", bet, username, uid)
     bot.send_photo(m.chat.id, img_buf, caption="Бросаем...")
     dv = bot.send_dice(m.chat.id, emoji='🏀').dice.value
     time.sleep(4)
     if dv >= 4:
         profit = round(bet * 0.9, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🏀 Баскетбол")
+        img_buf = make_win_image(username, profit, "🏀 Баскетбол", uid)
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🏀 Баскетбол")
+        img_buf = make_lose_image(username, bet, "🏀 Баскетбол", uid)
     bot.send_photo(m.chat.id, img_buf,
                   caption=f"Бросок: {dv}/5\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("basket", mode))
@@ -740,21 +845,21 @@ def _basket(m, uid, bet):
 def _darts(m, uid, bet):
     mode = db.get_mode(uid)
     username = uname(m)
-    img_buf = make_game_image("🎯 Дартс", bet, username)
+    img_buf = make_game_image("🎯 Дартс", bet, username, uid)
     bot.send_photo(m.chat.id, img_buf, caption="Бросаем...")
     dv = bot.send_dice(m.chat.id, emoji='🎯').dice.value
     time.sleep(4)
     if dv == 6:
         profit = round(bet * 2.0, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎯 Дартс (ЯБЛОЧКО!)")
+        img_buf = make_win_image(username, profit, "🎯 Дартс (ЯБЛОЧКО!)", uid)
     elif dv >= 4:
         profit = round(bet * 0.7, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎯 Дартс (Близко)")
+        img_buf = make_win_image(username, profit, "🎯 Дартс (Близко)", uid)
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🎯 Дартс")
+        img_buf = make_lose_image(username, bet, "🎯 Дартс", uid)
     bot.send_photo(m.chat.id, img_buf,
                   caption=f"Попадание: {dv}/6\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("darts", mode))
@@ -765,21 +870,21 @@ def _darts(m, uid, bet):
 def _bowling(m, uid, bet):
     mode = db.get_mode(uid)
     username = uname(m)
-    img_buf = make_game_image("🎳 Боулинг", bet, username)
+    img_buf = make_game_image("🎳 Боулинг", bet, username, uid)
     bot.send_photo(m.chat.id, img_buf, caption="Бросаем...")
     dv = bot.send_dice(m.chat.id, emoji='🎳').dice.value
     time.sleep(4)
     if dv == 6:
         profit = round(bet * 1.5, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎳 Боулинг (СТРАЙК!)")
+        img_buf = make_win_image(username, profit, "🎳 Боулинг (СТРАЙК!)", uid)
     elif dv >= 3:
         profit = round(bet * 0.5, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎳 Боулинг")
+        img_buf = make_win_image(username, profit, "🎳 Боулинг", uid)
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🎳 Боулинг")
+        img_buf = make_lose_image(username, bet, "🎳 Боулинг", uid)
     bot.send_photo(m.chat.id, img_buf,
                   caption=f"Кегли: {dv}/6\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("bowling", mode))
@@ -793,7 +898,7 @@ def _snake(m, uid, bet):
     k = types.InlineKeyboardMarkup(row_width=5)
     k.add(*[types.InlineKeyboardButton(str(i), callback_data=f"snake_{uid}_{i}") for i in range(1, 6)])
     username = uname(m)
-    img_buf = make_game_image("🐍 Угадай 1/5", bet, username)
+    img_buf = make_game_image("🐍 Угадай 1/5", bet, username, uid)
     bot.send_photo(m.chat.id, img_buf, caption="Выбери число 1-5:", reply_markup=k)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("snake_"))
@@ -819,11 +924,11 @@ def cb_snake(c):
     if guess == target:
         profit = round(bet * 3.0, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🐍 Угадай 1/5")
+        img_buf = make_win_image(username, profit, "🐍 Угадай 1/5", uid)
         log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Угадай 1/5 (было {target})")
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🐍 Угадай 1/5")
+        img_buf = make_lose_image(username, bet, "🐍 Угадай 1/5", uid)
         log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Угадай 1/5 (было {target})")
     
     try:
@@ -972,7 +1077,7 @@ def _bj_start(m, uid, bet):
     dh = [deck.pop(), deck.pop()]
     BJ[uid] = {"deck": deck, "p": ph, "d": dh, "bet": bet, "cid": m.chat.id}
     username = uname(m)
-    img_buf = make_game_image("🃏 Блэкджек", bet, username)
+    img_buf = make_game_image("🃏 Блэкджек", bet, username, uid)
     bot.send_photo(m.chat.id, img_buf, caption=f"Раздача...")
     _bj_show(m.chat.id, uid)
 
@@ -1007,9 +1112,9 @@ def _bj_show(cid, uid, end=False, edit_mid=None):
         username = uname(BJ[uid]['p'] if uid in BJ else '')
         
         if won:
-            img_buf = make_win_image(username, res, "🃏 Блэкджек")
+            img_buf = make_win_image(username, res, "🃏 Блэкджек", uid)
         else:
-            img_buf = make_lose_image(username, res, "🃏 Блэкджек")
+            img_buf = make_lose_image(username, res, "🃏 Блэкджек", uid)
         
         try:
             bot.edit_message_text(text, cid, edit_mid, reply_markup=kb_again("blackjack", mode))
@@ -1099,7 +1204,7 @@ def _spin():
 def _slots(m, uid, bet):
     mode = db.get_mode(uid)
     username = uname(m)
-    img_buf = make_game_image("🎰 Слоты", bet, username)
+    img_buf = make_game_image("🎰 Слоты", bet, username, uid)
     anim = bot.send_photo(m.chat.id, img_buf, caption="Крутим...")
     time.sleep(0.5)
     
@@ -1121,11 +1226,11 @@ def _slots(m, uid, bet):
     if mult > 0:
         profit = round(bet * mult, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎰 Слоты")
+        img_buf = make_win_image(username, profit, "🎰 Слоты", uid)
         log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Слоты (×{mult})")
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🎰 Слоты")
+        img_buf = make_lose_image(username, bet, "🎰 Слоты", uid)
         log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Слоты")
     
     try:
@@ -1154,7 +1259,7 @@ def _roulette_start(m, uid, bet):
         types.InlineKeyboardButton("Чётное ×2", callback_data=f"rul_{uid}_{bet}_even"),
     )
     username = uname(m)
-    img_buf = make_game_image("🎡 Рулетка", bet, username)
+    img_buf = make_game_image("🎡 Рулетка", bet, username, uid)
     bot.send_photo(m.chat.id, img_buf, caption="Выбери ставку:", reply_markup=k)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("rul_"))
@@ -1191,11 +1296,11 @@ def _rul_spin(msg, uid, bet, choice):
     if won:
         profit = round(bet * mult, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎡 Рулетка")
+        img_buf = make_win_image(username, profit, "🎡 Рулетка", uid)
         log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Рулетку ({col} {result})")
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🎡 Рулетка")
+        img_buf = make_lose_image(username, bet, "🎡 Рулетка", uid)
         log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Рулетку ({col} {result})")
     
     bot.send_photo(cid, img_buf,
@@ -1213,7 +1318,7 @@ def _mines_start(m, uid, bet, mine_count=1):
             f"💣 {n}", callback_data=f"mn_init_{uid}_{bet}_{n}_{mine_count}"))
     
     username = uname(m)
-    img_buf = make_game_image(f"💣{'💣' if mine_count == 2 else ''} Майнс", bet, username)
+    img_buf = make_game_image(f"💣{'💣' if mine_count == 2 else ''} Майнс", bet, username, uid)
     bot.send_photo(m.chat.id, img_buf,
                   caption=f"Выбери мин (макс {min(amounts)}):", reply_markup=k)
 
@@ -1315,7 +1420,7 @@ def cb_mn_cell(c):
         )
         
         username = uname(c)
-        img_buf = make_lose_image(username, s["bet"], f"💣 Майнс")
+        img_buf = make_lose_image(username, s["bet"], f"💣 Майнс", uid)
         MN.pop(uid, None)
         
         try:
@@ -1356,7 +1461,7 @@ def cb_mn_cashout(c):
     )
     
     username = uname(c)
-    img_buf = make_win_image(username, profit, "💣 Майнс — Кэшаут")
+    img_buf = make_win_image(username, profit, "💣 Майнс — Кэшаут", uid)
     
     try:
         bot.edit_message_media(
@@ -1382,7 +1487,7 @@ def _tower_start(m, uid, bet):
         "history": []
     }
     
-    img_buf = make_game_image("🏔️ Башня", bet, username)
+    img_buf = make_game_image("🏔️ Башня", bet, username, uid)
     msg = bot.send_photo(m.chat.id, img_buf, caption="🏔️ Башня\n\nУровень 0\nНажми ВПЕРЁД!")
     
     k = types.InlineKeyboardMarkup(row_width=2)
@@ -1417,7 +1522,7 @@ def cb_tower(c):
         mode = db.get_mode(uid)
         username = uname(c)
         
-        img_buf = make_win_image(username, profit, f"🏔️ Башня (Уровень {level})")
+        img_buf = make_win_image(username, profit, f"🏔️ Башня (Уровень {level})", uid)
         
         k = types.InlineKeyboardMarkup(row_width=2)
         k.add(
@@ -1455,7 +1560,7 @@ def cb_tower(c):
             db.record(uid, s["bet"], False)
             mode = db.get_mode(uid)
             username = uname(c)
-            img_buf = make_lose_image(username, s["bet"], "🏔️ Башня (Упал с 0)")
+            img_buf = make_lose_image(username, s["bet"], "🏔️ Башня (Упал с 0)", uid)
             
             k = types.InlineKeyboardMarkup(row_width=2)
             k.add(
@@ -1481,7 +1586,7 @@ def cb_tower(c):
             db.record(uid, s["bet"], True, profit)
             mode = db.get_mode(uid)
             username = uname(c)
-            img_buf = make_lose_image(username, -profit, "🏔️ Башня (Упал)")
+            img_buf = make_lose_image(username, -profit, "🏔️ Башня (Упал)", uid)
             
             k = types.InlineKeyboardMarkup(row_width=2)
             k.add(
@@ -1528,7 +1633,7 @@ def _crash_info(c):
     G[uid] = {"wait": "crash_bet", "cid": c.message.chat.id, "creator": uid}
     bot.answer_callback_query(c.id)
     username = uname(c)
-    img_buf = make_game_image("🚀 Краш", 0, username)
+    img_buf = make_game_image("🚀 Краш", 0, username, uid)
     bot.send_photo(c.message.chat.id, img_buf,
                   caption=f"Ракета взлетает!\nВведи ставку (мин. 0.15 $):")
 
@@ -1570,7 +1675,7 @@ def _crash_run(m, uid, bet):
     
     CR[uid] = {"active": True, "cashed": False, "mult": mult,
                "cid": cid, "mid": msg.message_id, "bet": bet,
-               "crash": crash, "username": username}
+               "crash": crash, "username": username, "uid": uid}
     
     bot.edit_message_reply_markup(cid, msg.message_id, reply_markup=k)
 
@@ -1590,7 +1695,7 @@ def _crash_run(m, uid, bet):
                 
                 db.record(uid, bet, False)
                 mode = db.get_mode(uid)
-                img_buf = make_lose_image(state["username"], bet, f"🚀 Краш (×{crash})")
+                img_buf = make_lose_image(state["username"], bet, f"🚀 Краш (×{crash})", uid)
                 
                 kb2 = types.InlineKeyboardMarkup(row_width=2)
                 kb2.add(
@@ -1641,7 +1746,7 @@ def cb_crash_out(c):
     db.record(uid, bet, True, profit)
     mode = db.get_mode(uid)
     
-    img_buf = make_win_image(s["username"], profit, f"🚀 Краш (×{mult:.2f})")
+    img_buf = make_win_image(s["username"], profit, f"🚀 Краш (×{mult:.2f})", uid)
     
     kb2 = types.InlineKeyboardMarkup(row_width=2)
     kb2.add(
@@ -1678,7 +1783,7 @@ def _trader(m, uid, bet):
     )
     
     username = uname(m)
-    img_buf = make_game_image(f"📈 {coin}", bet, username)
+    img_buf = make_game_image(f"📈 {coin}", bet, username, uid)
     bot.send_photo(m.chat.id, img_buf,
                   caption=f"🪙 {coin} = ${fmt(price)}\n\nКуда пойдёт цена?", reply_markup=k)
 
@@ -1717,11 +1822,11 @@ def cb_trader(c):
     if correct:
         profit = round(bet * 0.9, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, f"📈 {coin}")
+        img_buf = make_win_image(username, profit, f"📈 {coin}", uid)
         log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Трейдер ({coin})")
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, f"📈 {coin}")
+        img_buf = make_lose_image(username, bet, f"📈 {coin}", uid)
         log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Трейдер ({coin})")
     
     arrow = "📈" if went_up else "📉"
@@ -1750,7 +1855,7 @@ def cmd_profile(m):
         bot.send_message(m.chat.id, "Профиль не найден.")
         return
     
-    buf = make_profile_card(user)
+    buf = make_profile_card(user, uid)
     bot.send_photo(m.chat.id, buf)
 
 # ════════════════════════════════════════════
@@ -1760,7 +1865,8 @@ def cmd_profile(m):
 def cmd_top(m):
     rows = db.top(10)
     if not rows:
-        bot.send_message(m.chat.id, "Таблица пуста.");  return
+        bot.send_message(m.chat.id, "Таблица пуста.")
+        return
     
     medals = ["🥇","🥈","🥉"] + ["🔹"]*7
     text = "<b>🏆 ТОП-10</b>\n"
@@ -1778,7 +1884,8 @@ def cmd_stats(m):
     db.ensure(uid, uname(m))
     user = db.get(uid)
     if not user:
-        bot.send_message(m.chat.id, "Нет данных.");  return
+        bot.send_message(m.chat.id, "Нет данных.")
+        return
     
     wr = round(user['wins'] / user['games'] * 100, 1) if user['games'] else 0
     profit = user['total_won'] - user['total_bet']
@@ -1886,7 +1993,7 @@ def run_flask():
 
     @app.route('/')
     def index():
-        return "<h2>🎰 NEZZX x KLITOK CASINO — Online</h2>"
+        return f"<h2>🎰 {CASINO_NAME} — Online</h2>"
 
     @app.route('/health')
     def health():
@@ -1899,7 +2006,7 @@ def run_flask():
 #  ЗАПУСК
 # ════════════════════════════════════════════
 if __name__ == "__main__":
-    logger.info("🎰 NEZZX x KLITOK CASINO — ЗАПУСК")
+    logger.info(f"🎰 {CASINO_NAME} — ЗАПУСК")
     threading.Thread(target=run_flask, daemon=True).start()
     logger.info("🌐 Flask запущен")
     
