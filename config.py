@@ -1,8 +1,0 @@
-import os
-
-TOKEN = os.environ.get("TOKEN")
-ADMIN_IDS = [8357023784, 8539734813]
-LOG_CHANNEL_ID = -1003951162583
-CRYPTO_LINK = "http://t.me/send?start=IVpZKHj5lZFO"
-CASINO_NAME = "NEZZX x KLITOK CASINO"
-WIN_IMAGE = "win.png"
