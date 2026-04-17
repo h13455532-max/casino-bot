@@ -1,4 +1,4 @@
-# bot.py — MEGA CASINO PRO v3.2 (Fixed & Production Ready)
+# bot.py — MEGA CASINO PRO v3.3 (Mines Fix + Beautiful UI)
 import telebot, sqlite3, random, threading, time, os, logging, io, math
 from telebot import types
 from flask import Flask
@@ -64,7 +64,6 @@ class CasinoDB:
         return dict(r) if r else None
 
     def get_by_username(self, username):
-        """Получить пользователя по юзернейму"""
         username = username.lstrip('@').lower()
         self.cur.execute("SELECT id FROM users WHERE LOWER(username)=?", (username,))
         r = self.cur.fetchone()
@@ -124,21 +123,19 @@ class CasinoDB:
 db = CasinoDB()
 
 # ════════════════════════════════════════════
-#  ЛОГИРОВАНИЕ В КАНАЛ
+#  ЛОГИРОВАНИЕ
 # ════════════════════════════════════════════
 def log_to_channel(text):
-    """Логирование событий в канал"""
     try:
         bot.send_message(LOG_CHANNEL_ID, text)
     except Exception as e:
         logger.error(f"Ошибка логирования: {e}")
 
 # ════════════════════════════════════════════
-#  ГЕНЕРАЦИЯ КАРТИНОК (PIL)
+#  КРАСИВЫЕ КАРТИНКИ
 # ════════════════════════════════════════════
 
 def make_rounded_image(img, radius=40):
-    """Делает картинку с закругленными углами"""
     img = img.convert("RGBA")
     mask = Image.new("L", img.size, 0)
     draw_mask = ImageDraw.Draw(mask)
@@ -147,7 +144,6 @@ def make_rounded_image(img, radius=40):
     return img
 
 def get_avatar_circle(user_id, size=200):
-    """Получает аватарку пользователя в виде круга"""
     try:
         photos = bot.get_user_profile_photos(user_id, limit=1)
         if photos.photos:
@@ -156,7 +152,6 @@ def get_avatar_circle(user_id, size=200):
             avatar = Image.open(io.BytesIO(downloaded_file))
             avatar = avatar.resize((size, size), Image.Resampling.LANCZOS)
             
-            # Делаем круглую маску
             mask = Image.new("L", (size, size), 0)
             draw_mask = ImageDraw.Draw(mask)
             draw_mask.ellipse([0, 0, size, size], fill=255)
@@ -167,94 +162,103 @@ def get_avatar_circle(user_id, size=200):
         pass
     return None
 
-def make_win_image(username: str, amount: float, game_name: str, user_id: int = None) -> io.BytesIO:
-    """Красивая картинка ПОБЕДЫ"""
+# ════════════════════════════════════════════
+#  ГЕНЕРАЦИЯ РЕЗУЛЬТАТОВ (ПРОСТЫЕ, БОЛЬШИЕ)
+# ════════════════════════════════════════════
+
+def make_result_image(result_type: str, amount: float = 0) -> io.BytesIO:
+    """
+    result_type: 'win', 'lose', 'draw', 'deposit', 'withdraw'
+    """
     W, H = 1080, 1080
     img = Image.new("RGBA", (W, H), (10, 15, 35, 0))
     
-    bg = Image.new("RGB", (W, H), (10, 15, 35))
+    # Выбираем цвета и текст
+    if result_type == "win":
+        bg_color = (10, 60, 20)
+        text_color = (0, 255, 100)
+        emoji = "🎉"
+        title = "ПОБЕДА!"
+        subtext = f"+ ${amount:.2f}"
+        accent_color = (0, 255, 100)
+    elif result_type == "lose":
+        bg_color = (60, 20, 20)
+        text_color = (255, 100, 100)
+        emoji = "💀"
+        title = "ПРОИГРЫШ"
+        subtext = f"- ${amount:.2f}"
+        accent_color = (255, 100, 100)
+    elif result_type == "draw":
+        bg_color = (40, 40, 60)
+        text_color = (100, 150, 255)
+        emoji = "🤝"
+        title = "НИЧЬЯ"
+        subtext = "Баланс не изменился"
+        accent_color = (100, 150, 255)
+    elif result_type == "deposit":
+        bg_color = (10, 40, 60)
+        text_color = (0, 200, 255)
+        emoji = "💳"
+        title = "ПОПОЛНЕНИЕ"
+        subtext = f"+ ${amount:.2f}"
+        accent_color = (0, 200, 255)
+    elif result_type == "withdraw":
+        bg_color = (40, 20, 60)
+        text_color = (200, 100, 255)
+        emoji = "🏦"
+        title = "ВЫВОД"
+        subtext = f"- ${amount:.2f}"
+        accent_color = (200, 100, 255)
+    else:
+        bg_color = (30, 30, 30)
+        text_color = (200, 200, 200)
+        emoji = "❓"
+        title = "?"
+        subtext = ""
+        accent_color = (200, 200, 200)
+    
+    # Фон с градиентом
+    bg = Image.new("RGB", (W, H), bg_color)
     draw_bg = ImageDraw.Draw(bg)
     for y in range(H):
         ratio = y / H
-        r = int(10 + 30 * ratio)
-        g = int(15 + 40 * ratio)
-        b = int(35 + 80 * ratio)
+        if result_type == "win":
+            r = int(10 + 20 * ratio)
+            g = int(60 + 100 * ratio)
+            b = int(20 + 50 * ratio)
+        elif result_type == "lose":
+            r = int(60 + 50 * ratio)
+            g = int(20 + 10 * ratio)
+            b = int(20 + 30 * ratio)
+        else:
+            r = int(bg_color[0] + 30 * ratio)
+            g = int(bg_color[1] + 40 * ratio)
+            b = int(bg_color[2] + 80 * ratio)
         draw_bg.line([(0, y), (W, y)], fill=(r, g, b))
     
     draw_bg.rounded_rectangle([30, 30, W-30, H-30], radius=40,
-                              outline=(0, 255, 100), width=6)
+                             outline=accent_color, width=6)
     
     img.paste(bg, (0, 0))
     draw = ImageDraw.Draw(img)
     
+    # Закругленный контейнер
     draw.rounded_rectangle([60, 60, W-60, H-60], radius=35,
-                          outline=(0, 200, 100), width=3)
+                          outline=accent_color, width=3)
     
-    draw.rectangle([60, 60, W-60, 250], fill=(15, 30, 60))
-    draw.text((W//2-120, 100), "🎉 ПОБЕДА! 🎉", fill=(0, 255, 100))
+    # ЭМОДЗИ ГИГАНТСКИЙ
+    draw.text((W//2-150, 150), emoji, fill=accent_color)
     
-    if user_id:
-        avatar = get_avatar_circle(user_id, size=120)
-        if avatar:
-            img.paste(avatar, (W//2 - 60, 280), mask=avatar)
-        else:
-            draw.ellipse([W//2-60, 280, W//2+60, 400], fill=(40, 30, 80), outline=(0, 255, 100), width=3)
-            draw.text((W//2-25, 330), "👤", fill=(200, 180, 255))
+    # ЗАГОЛОВОК ОГРОМНЫЙ
+    draw.text((W//2-300, 350), title, fill=text_color)
     
-    draw.text((W//2-200, 450), f"+ ${amount:.2f}", fill=(0, 255, 100))
-    draw.text((W//2-150, 600), f"{game_name}", fill=(150, 200, 255))
-    draw.text((W//2-180, 720), f"{username[:20]}", fill=(200, 200, 255))
+    # СУММА БОЛЬШАЯ
+    if amount > 0 or result_type in ("deposit", "withdraw"):
+        draw.text((W//2-250, 600), subtext, fill=accent_color)
     
-    draw.rectangle([60, 850, W-60, 950], fill=(0, 100, 50))
-    draw.text((W//2-150, 880), CASINO_NAME, fill=(0, 255, 100))
-    
-    img = make_rounded_image(img, radius=40)
-    
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
-
-def make_lose_image(username: str, amount: float, game_name: str, user_id: int = None) -> io.BytesIO:
-    """Красивая картинка ПРОИГРЫША"""
-    W, H = 1080, 1080
-    img = Image.new("RGBA", (W, H), (35, 10, 10, 0))
-    
-    bg = Image.new("RGB", (W, H), (35, 10, 10))
-    draw_bg = ImageDraw.Draw(bg)
-    for y in range(H):
-        ratio = y / H
-        r = int(35 + 50 * ratio)
-        g = int(10 + 10 * ratio)
-        b = int(10 + 20 * ratio)
-        draw_bg.line([(0, y), (W, y)], fill=(r, g, b))
-    
-    draw_bg.rounded_rectangle([30, 30, W-30, H-30], radius=40,
-                              outline=(255, 100, 100), width=6)
-    
-    img.paste(bg, (0, 0))
-    draw = ImageDraw.Draw(img)
-    
-    draw.rounded_rectangle([60, 60, W-60, H-60], radius=35,
-                          outline=(200, 100, 100), width=3)
-    
-    draw.rectangle([60, 60, W-60, 250], fill=(60, 30, 30))
-    draw.text((W//2-120, 100), "❌ ПРОИГРЫШ ❌", fill=(255, 100, 100))
-    
-    if user_id:
-        avatar = get_avatar_circle(user_id, size=120)
-        if avatar:
-            img.paste(avatar, (W//2 - 60, 280), mask=avatar)
-        else:
-            draw.ellipse([W//2-60, 280, W//2+60, 400], fill=(60, 30, 30), outline=(255, 100, 100), width=3)
-            draw.text((W//2-25, 330), "👤", fill=(255, 180, 180))
-    
-    draw.text((W//2-180, 450), f"- ${amount:.2f}", fill=(255, 100, 100))
-    draw.text((W//2-150, 600), f"{game_name}", fill=(255, 150, 150))
-    draw.text((W//2-180, 720), f"{username[:20]}", fill=(255, 200, 200))
-    
-    draw.rectangle([60, 850, W-60, 950], fill=(100, 30, 30))
-    draw.text((W//2-150, 880), CASINO_NAME, fill=(255, 100, 100))
+    # CASINO NAME внизу
+    draw.rectangle([60, 850, W-60, 950], fill=(20, 20, 40))
+    draw.text((W//2-200, 870), CASINO_NAME, fill=accent_color)
     
     img = make_rounded_image(img, radius=40)
     
@@ -268,7 +272,6 @@ def make_profile_card(user: dict, user_id: int) -> io.BytesIO:
     W, H = 1080, 600
     img = Image.new("RGBA", (W, H), (10, 10, 25, 0))
     
-    # Фон
     bg = Image.new("RGB", (W, H), (10, 10, 25))
     draw_bg = ImageDraw.Draw(bg)
     for y in range(H):
@@ -284,7 +287,7 @@ def make_profile_card(user: dict, user_id: int) -> io.BytesIO:
     img.paste(bg, (0, 0))
     draw = ImageDraw.Draw(img)
     
-    # ЛЕВАЯ ПОЛОВИНА: АВАТАР (большой, на всю высоту)
+    # ЛЕВАЯ: АВАТАР
     avatar = get_avatar_circle(user_id, size=480)
     if avatar:
         img.paste(avatar, (30, 60), mask=avatar)
@@ -292,16 +295,12 @@ def make_profile_card(user: dict, user_id: int) -> io.BytesIO:
         draw.ellipse([30, 60, 510, 540], fill=(40, 30, 80), outline=(150, 100, 200), width=3)
         draw.text((220, 280), "👤", fill=(200, 180, 255))
     
-    # ПРАВАЯ ПОЛОВИНА: INFO
+    # ПРАВАЯ: INFO
     x_right = 550
     
-    # Юзернейм (большой)
     draw.text((x_right, 80), user['username'], fill=(240, 230, 255))
-    
-    # Баланс (ОГРОМНЫЙ)
     draw.text((x_right, 180), f"${user['balance']:.4f}", fill=(80, 255, 150))
     
-    # Маленькая инфо
     draw.text((x_right, 340), f"Игр: {user['games']}", fill=(150, 200, 255))
     draw.text((x_right, 380), f"Побед: {user['wins']}", fill=(150, 200, 255))
     
@@ -662,7 +661,6 @@ def handle_mines_select(m):
 #  ДИСПЕТЧЕРЫ ИГР
 # ════════════════════════════════════════════
 def _launch_brainrot(m, uid, game, username):
-    """Запуск BrainRot игр БЕЗ баланса"""
     fn = {
         "dice": _dice_br, "coin": _coin_br, "football": _football_br,
         "basket": _basket_br, "darts": _darts_br, "bowling": _bowling_br,
@@ -670,11 +668,8 @@ def _launch_brainrot(m, uid, game, username):
     }.get(game)
     if fn:
         fn(m, uid)
-    else:
-        bot.send_message(m.chat.id, "⚠️ Игра в разработке!")
 
 def _launch_crypto(m, uid, game, bet, username):
-    """Запуск Crypto Casino игр С балансом"""
     fn = {
         "dice": _dice_crypto, "coin": _coin_crypto, "football": _football_crypto,
         "basket": _basket_crypto, "darts": _darts_crypto, "bowling": _bowling_crypto,
@@ -684,27 +679,27 @@ def _launch_crypto(m, uid, game, bet, username):
     }.get(game)
     if fn:
         fn(m, uid, bet)
-    else:
-        bot.send_message(m.chat.id, "⚠️ Игра в разработке!")
 
 # ════════════════════════════════════════════
-#  🎲 BRAINROT: КОСТИ (Без баланса)
+#  🎲 BRAINROT: КОСТИ
 # ════════════════════════════════════════════
 def _dice_br(m, uid):
     username = uname(m)
     bot.send_message(m.chat.id, f"🎲 Кости! Бросаем...")
     dv = bot.send_dice(m.chat.id, emoji='🎲').dice.value
-    time.sleep(3)
+    time.sleep(2)
     
     if dv >= 4:
-        bot.send_message(m.chat.id, f"✅ ПОБЕДА! Выпало {dv}")
+        img = make_result_image("win", bet=0)
+        bot.send_photo(m.chat.id, img, caption=f"Выпало {dv}")
         log_to_channel(f"🎲 {username} выиграл в BrainRot Кости (выпало {dv})")
     else:
-        bot.send_message(m.chat.id, f"❌ ПРОИГРЫШ! Выпало {dv}")
+        img = make_result_image("lose", bet=0)
+        bot.send_photo(m.chat.id, img, caption=f"Выпало {dv}")
         log_to_channel(f"🎲 {username} проиграл в BrainRot Кости (выпало {dv})")
 
 # ════════════════════════════════════════════
-#  🪙 BRAINROT: МОНЕТКА (Без баланса)
+#  🪙 BRAINROT: МОНЕТКА
 # ════════════════════════════════════════════
 def _coin_br(m, uid):
     k = types.InlineKeyboardMarkup(row_width=2)
@@ -729,82 +724,94 @@ def cb_coin_br(c):
     emoji = "👑" if result == "h" else "🔵"
     
     if won:
-        bot.send_message(c.message.chat.id, f"✅ ПОБЕДА! Выпало {emoji}")
+        img = make_result_image("win", bet=0)
+        bot.send_photo(c.message.chat.id, img, caption=f"Выпало {emoji}")
         log_to_channel(f"🪙 {username} выиграл в BrainRot Монетку ({emoji})")
     else:
-        bot.send_message(c.message.chat.id, f"❌ ПРОИГРЫШ! Выпало {emoji}")
+        img = make_result_image("lose", bet=0)
+        bot.send_photo(c.message.chat.id, img, caption=f"Выпало {emoji}")
         log_to_channel(f"🪙 {username} проиграл в BrainRot Монетку ({emoji})")
     
     bot.answer_callback_query(c.id)
 
 # ════════════════════════════════════════════
-#  ⚽ BRAINROT: ФУТБОЛ (Без баланса)
+#  ⚽ BRAINROT: ФУТБОЛ
 # ════════════════════════════════════════════
 def _football_br(m, uid):
     username = uname(m)
     bot.send_message(m.chat.id, f"⚽ Футбол! Бросаем...")
     dv = bot.send_dice(m.chat.id, emoji='⚽').dice.value
-    time.sleep(3)
+    time.sleep(2)
     if dv >= 4:
-        bot.send_message(m.chat.id, f"⚽ ГОЛ! ({dv}/5)")
-        log_to_channel(f"⚽ {username} выиграл в BrainRot Футбол (гол {dv})")
+        img = make_result_image("win", bet=0)
+        bot.send_photo(m.chat.id, img, caption=f"ГОЛ! {dv}/5")
+        log_to_channel(f"⚽ {username} выиграл в BrainRot Футбол")
     else:
-        bot.send_message(m.chat.id, f"⚽ МИМО! ({dv}/5)")
-        log_to_channel(f"⚽ {username} проиграл в BrainRot Футбол (мимо {dv})")
+        img = make_result_image("lose", bet=0)
+        bot.send_photo(m.chat.id, img, caption=f"МИМО! {dv}/5")
+        log_to_channel(f"⚽ {username} проиграл в BrainRot Футбол")
 
 # ════════════════════════════════════════════
-#  🏀 BRAINROT: БАСКЕТ (Без баланса)
+#  🏀 BRAINROT: БАСКЕТ
 # ════════════════════════════════════════════
 def _basket_br(m, uid):
     username = uname(m)
     bot.send_message(m.chat.id, f"🏀 Баскетбол! Бросаем...")
     dv = bot.send_dice(m.chat.id, emoji='🏀').dice.value
-    time.sleep(3)
+    time.sleep(2)
     if dv >= 4:
-        bot.send_message(m.chat.id, f"🏀 ПОПАЛ! ({dv}/5)")
-        log_to_channel(f"🏀 {username} выиграл в BrainRot Баскет (попал {dv})")
+        img = make_result_image("win", bet=0)
+        bot.send_photo(m.chat.id, img, caption=f"ПОПАЛ! {dv}/5")
+        log_to_channel(f"🏀 {username} выиграл в BrainRot Баскет")
     else:
-        bot.send_message(m.chat.id, f"🏀 ПРОМАХ! ({dv}/5)")
-        log_to_channel(f"🏀 {username} проиграл в BrainRot Баскет (промах {dv})")
+        img = make_result_image("lose", bet=0)
+        bot.send_photo(m.chat.id, img, caption=f"ПРОМАХ! {dv}/5")
+        log_to_channel(f"🏀 {username} проиграл в BrainRot Баскет")
 
 # ════════════════════════════════════════════
-#  🎯 BRAINROT: ДАРТС (Без баланса)
+#  🎯 BRAINROT: ДАРТС
 # ════════════════════════════════════════════
 def _darts_br(m, uid):
     username = uname(m)
     bot.send_message(m.chat.id, f"🎯 Дартс! Бросаем...")
     dv = bot.send_dice(m.chat.id, emoji='🎯').dice.value
-    time.sleep(3)
+    time.sleep(2)
     if dv == 6:
-        bot.send_message(m.chat.id, f"🎯 ЯБЛОЧКО! (6/6)")
-        log_to_channel(f"🎯 {username} выиграл в BrainRot Дартс (яблочко!)")
+        img = make_result_image("win", bet=0)
+        bot.send_photo(m.chat.id, img, caption=f"ЯБЛОЧКО! 6/6")
+        log_to_channel(f"🎯 {username} выиграл в BrainRot Дартс")
     elif dv >= 4:
-        bot.send_message(m.chat.id, f"🎯 Близко! ({dv}/6)")
-        log_to_channel(f"🎯 {username} выиграл в BrainRot Дартс ({dv}/6)")
+        img = make_result_image("win", bet=0)
+        bot.send_photo(m.chat.id, img, caption=f"Близко! {dv}/6")
+        log_to_channel(f"🎯 {username} выиграл в BrainRot Дартс")
     else:
-        bot.send_message(m.chat.id, f"🎯 Промах! ({dv}/6)")
-        log_to_channel(f"🎯 {username} проиграл в BrainRot Дартс ({dv}/6)")
+        img = make_result_image("lose", bet=0)
+        bot.send_photo(m.chat.id, img, caption=f"Промах! {dv}/6")
+        log_to_channel(f"🎯 {username} проиграл в BrainRot Дартс")
 
 # ════════════════════════════════════════════
-#  🎳 BRAINROT: БОУЛИНГ (Без баланса)
+#  🎳 BRAINROT: БОУЛИНГ
 # ════════════════════════════════════════════
 def _bowling_br(m, uid):
     username = uname(m)
     bot.send_message(m.chat.id, f"🎳 Боулинг! Бросаем...")
     dv = bot.send_dice(m.chat.id, emoji='🎳').dice.value
-    time.sleep(3)
+    time.sleep(2)
     if dv == 6:
-        bot.send_message(m.chat.id, f"🎳 СТРАЙК! (6/6)")
-        log_to_channel(f"🎳 {username} выиграл в BrainRot Боулинг (страйк!)")
+        img = make_result_image("win", bet=0)
+        bot.send_photo(m.chat.id, img, caption=f"СТРАЙК! 6/6")
+        log_to_channel(f"🎳 {username} выиграл в BrainRot Боулинг")
     elif dv >= 3:
-        bot.send_message(m.chat.id, f"🎳 Неплохо! ({dv} кеглей)")
-        log_to_channel(f"🎳 {username} выиграл в BrainRot Боулинг ({dv} кеглей)")
+        img = make_result_image("win", bet=0)
+        bot.send_photo(m.chat.id, img, caption=f"Неплохо! {dv} кеглей")
+        log_to_channel(f"🎳 {username} выиграл в BrainRot Боулинг")
     else:
-        bot.send_message(m.chat.id, f"🎳 Гатер! ({dv} кегли)")
-        log_to_channel(f"🎳 {username} проиграл в BrainRot Боулинг ({dv} кегли)")
+        img = make_result_image("lose", bet=0)
+        bot.send_photo(m.chat.id, img, caption=f"Гатер! {dv} кегли")
+        log_to_channel(f"🎳 {username} проиграл в BrainRot Боулинг")
 
 # ════════════════════════════════════════════
-#  🐍 BRAINROT: УГАДАЙ 1/5 (Без баланса)
+#  🐍 BRAINROT: УГАДАЙ 1/5
 # ════════════════════════════════════════════
 def _snake_br(m, uid):
     target = random.randint(1, 5)
@@ -832,11 +839,13 @@ def cb_snake_br(c):
     username = uname(c)
     
     if guess == target:
-        bot.send_message(c.message.chat.id, f"✅ УГАДАЛ! Было {target}")
-        log_to_channel(f"🐍 {username} выиграл в BrainRot Угадай (было {target})")
+        img = make_result_image("win", bet=0)
+        bot.send_photo(c.message.chat.id, img, caption=f"Было {target}")
+        log_to_channel(f"🐍 {username} выиграл в BrainRot Угадай")
     else:
-        bot.send_message(c.message.chat.id, f"❌ НЕ УГАДАЛ! Было {target}, выбрал {guess}")
-        log_to_channel(f"🐍 {username} проиграл в BrainRot Угадай (было {target})")
+        img = make_result_image("lose", bet=0)
+        bot.send_photo(c.message.chat.id, img, caption=f"Было {target}, выбрал {guess}")
+        log_to_channel(f"🐍 {username} проиграл в BrainRot Угадай")
     
     bot.answer_callback_query(c.id)
 
@@ -852,14 +861,12 @@ def _pvp_create(c):
     
     mode = db.get_mode(uid)
     if mode == "brainrot":
-        # BrainRot PvP - без ставок
         k = types.InlineKeyboardMarkup()
         k.add(types.InlineKeyboardButton(f"⚔️ Принять дуэль", callback_data=f"pvp_acc_br_{uid}"))
         msg = bot.send_message(chat_id,
             f"<b>⚔️ PvP ДУЭЛЬ (BrainRot)</b>\n{uname(c)} vs ???\n\n⏱ 60 сек", reply_markup=k)
         PVP[chat_id] = {"creator": uid, "cname": uname(c), "mode": "brainrot", "mid": msg.message_id}
     else:
-        # Crypto PvP - с ставками
         G[uid] = {"wait": "pvp_bet", "chat_id": chat_id, "creator": uid}
         bot.answer_callback_query(c.id)
         bot.send_message(chat_id,
@@ -901,14 +908,17 @@ def cb_pvp_br(c):
     d1 = bot.send_dice(chat_id, emoji='🎲').dice.value
     time.sleep(1)
     d2 = bot.send_dice(chat_id, emoji='🎲').dice.value
-    time.sleep(3)
+    time.sleep(2)
     
     if d1 > d2:
-        bot.send_message(chat_id, f"<b>🔴 {lobby['cname']} ПОБЕДИЛ!</b>\n{d1} vs {d2}")
+        img = make_result_image("win", bet=0)
+        bot.send_photo(chat_id, img, caption=f"🔴 {lobby['cname']} ПОБЕДИЛ!\n{d1} vs {d2}")
     elif d2 > d1:
-        bot.send_message(chat_id, f"<b>🔵 {uname(c)} ПОБЕДИЛ!</b>\n{d2} vs {d1}")
+        img = make_result_image("win", bet=0)
+        bot.send_photo(chat_id, img, caption=f"🔵 {uname(c)} ПОБЕДИЛ!\n{d2} vs {d1}")
     else:
-        bot.send_message(chat_id, f"<b>🤝 НИЧЬЯ!</b>\n{d1} vs {d2}")
+        img = make_result_image("draw", bet=0)
+        bot.send_photo(chat_id, img, caption=f"НИЧЬЯ!\n{d1} vs {d2}")
 
 @bot.message_handler(func=lambda m: m.from_user.id in G and G[m.from_user.id].get("wait") == "pvp_bet")
 def handle_pvp_bet(m):
@@ -973,10 +983,11 @@ def cb_pvp_crypto(c):
     d1 = bot.send_dice(chat_id, emoji='🎲').dice.value
     time.sleep(1)
     d2 = bot.send_dice(chat_id, emoji='🎲').dice.value
-    time.sleep(3)
+    time.sleep(2)
     
     if d1 == d2:
-        bot.send_message(chat_id, f"<b>🤝 НИЧЬЯ!</b>  {d1} vs {d2}")
+        img = make_result_image("draw", bet=0)
+        bot.send_photo(chat_id, img, caption=f"НИЧЬЯ!\n{d1} vs {d2}")
         return
     
     if d1 > d2:
@@ -990,39 +1001,35 @@ def cb_pvp_crypto(c):
     db.record(wid, bet, True, prize)
     db.record(uid if wid != uid else creator, bet, False)
     
-    bot.send_message(chat_id,
-        f"<b>⚔️ РЕЗУЛЬТАТ</b>\n\n"
-        f"🔴 {lobby['cname']}: {d1}\n"
-        f"🔵 {uname(c)}: {d2}\n\n"
-        f"<b>👑 Победитель: {wname}!</b>\n"
-        f"+ ${fmt(prize)}")
+    img = make_result_image("win", prize)
+    bot.send_photo(chat_id, img, caption=f"👑 {wname}!\n{('🔴 ' + str(d1)) if d1 > d2 else ('🔵 ' + str(d2))} побеждает!")
 
 # ════════════════════════════════════════════
-#  🎲 CRYPTO: КОСТИ (С балансом)
+#  🎲 CRYPTO: КОСТИ
 # ════════════════════════════════════════════
 def _dice_crypto(m, uid, bet):
     mode = db.get_mode(uid)
     username = uname(m)
     
     dv = bot.send_dice(m.chat.id, emoji='🎲').dice.value
-    time.sleep(3)
+    time.sleep(2)
     
     if dv >= 4:
         profit = round(bet * 0.9, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎲 Кости", uid)
-        log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Кости (выпало {dv})")
+        img = make_result_image("win", profit)
+        log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Кости")
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🎲 Кости", uid)
-        log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Кости (выпало {dv})")
+        img = make_result_image("lose", bet)
+        log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Кости")
     
-    bot.send_photo(m.chat.id, img_buf, 
-                  caption=f"Выпало: <b>{dv}</b>\n💰 ${fmt(db.bal(uid))}",
+    bot.send_photo(m.chat.id, img, 
+                  caption=f"Выпало: {dv}\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("dice", mode))
 
 # ════════════════════════════════════════════
-#  🪙 CRYPTO: МОНЕТКА (С балансом)
+#  🪙 CRYPTO: МОНЕТКА
 # ════════════════════════════════════════════
 def _coin_crypto(m, uid, bet):
     k = types.InlineKeyboardMarkup(row_width=2)
@@ -1051,104 +1058,104 @@ def cb_coin_c(c):
     if won:
         profit = round(bet * 0.95, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🪙 Монетка", uid)
-        log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Монетку ({emoji})")
+        img = make_result_image("win", profit)
+        log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Монетку")
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🪙 Монетка", uid)
-        log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Монетку ({emoji})")
+        img = make_result_image("lose", bet)
+        log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Монетку")
     
-    bot.send_photo(c.message.chat.id, img_buf,
+    bot.send_photo(c.message.chat.id, img,
                   caption=f"Выпало: {emoji}\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("coin", mode))
     bot.answer_callback_query(c.id)
 
 # ════════════════════════════════════════════
-#  ⚽ CRYPTO: ФУТБОЛ (С балансом)
+#  ⚽ CRYPTO: ФУТБОЛ
 # ════════════════════════════════════════════
 def _football_crypto(m, uid, bet):
     mode = db.get_mode(uid)
     username = uname(m)
     dv = bot.send_dice(m.chat.id, emoji='⚽').dice.value
-    time.sleep(3)
+    time.sleep(2)
     if dv >= 4:
         profit = round(bet * 0.9, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "⚽ Футбол", uid)
+        img = make_result_image("win", profit)
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "⚽ Футбол", uid)
-    bot.send_photo(m.chat.id, img_buf,
+        img = make_result_image("lose", bet)
+    bot.send_photo(m.chat.id, img,
                   caption=f"Счёт: {dv}/5\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("football", mode))
 
 # ════════════════════════════════════════════
-#  🏀 CRYPTO: БАСКЕТ (С балансом)
+#  🏀 CRYPTO: БАСКЕТ
 # ════════════════════════════════════════════
 def _basket_crypto(m, uid, bet):
     mode = db.get_mode(uid)
     username = uname(m)
     dv = bot.send_dice(m.chat.id, emoji='🏀').dice.value
-    time.sleep(3)
+    time.sleep(2)
     if dv >= 4:
         profit = round(bet * 0.9, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🏀 Баскетбол", uid)
+        img = make_result_image("win", profit)
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🏀 Баскетбол", uid)
-    bot.send_photo(m.chat.id, img_buf,
+        img = make_result_image("lose", bet)
+    bot.send_photo(m.chat.id, img,
                   caption=f"Бросок: {dv}/5\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("basket", mode))
 
 # ════════════════════════════════════════════
-#  🎯 CRYPTO: ДАРТС (С балансом)
+#  🎯 CRYPTO: ДАРТС
 # ════════════════════════════════════════════
 def _darts_crypto(m, uid, bet):
     mode = db.get_mode(uid)
     username = uname(m)
     dv = bot.send_dice(m.chat.id, emoji='🎯').dice.value
-    time.sleep(3)
+    time.sleep(2)
     if dv == 6:
         profit = round(bet * 2.0, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎯 Дартс (ЯБЛОЧКО!)", uid)
+        img = make_result_image("win", profit)
     elif dv >= 4:
         profit = round(bet * 0.7, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎯 Дартс", uid)
+        img = make_result_image("win", profit)
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🎯 Дартс", uid)
-    bot.send_photo(m.chat.id, img_buf,
+        img = make_result_image("lose", bet)
+    bot.send_photo(m.chat.id, img,
                   caption=f"Попадание: {dv}/6\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("darts", mode))
 
 # ════════════════════════════════════════════
-#  🎳 CRYPTO: БОУЛИНГ (С балансом)
+#  🎳 CRYPTO: БОУЛИНГ
 # ════════════════════════════════════════════
 def _bowling_crypto(m, uid, bet):
     mode = db.get_mode(uid)
     username = uname(m)
     dv = bot.send_dice(m.chat.id, emoji='🎳').dice.value
-    time.sleep(3)
+    time.sleep(2)
     if dv == 6:
         profit = round(bet * 1.5, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎳 Боулинг (СТРАЙК!)", uid)
+        img = make_result_image("win", profit)
     elif dv >= 3:
         profit = round(bet * 0.5, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎳 Боулинг", uid)
+        img = make_result_image("win", profit)
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🎳 Боулинг", uid)
-    bot.send_photo(m.chat.id, img_buf,
+        img = make_result_image("lose", bet)
+    bot.send_photo(m.chat.id, img,
                   caption=f"Кегли: {dv}/6\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("bowling", mode))
 
 # ════════════════════════════════════════════
-#  🐍 CRYPTO: УГАДАЙ 1/5 (С балансом)
+#  🐍 CRYPTO: УГАДАЙ 1/5
 # ════════════════════════════════════════════
 def _snake_crypto(m, uid, bet):
     target = random.randint(1, 5)
@@ -1180,14 +1187,14 @@ def cb_snake_c(c):
     if guess == target:
         profit = round(bet * 3.0, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🐍 Угадай 1/5", uid)
-        log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Угадай 1/5 (было {target})")
+        img = make_result_image("win", profit)
+        log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Угадай 1/5")
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🐍 Угадай 1/5", uid)
-        log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Угадай 1/5 (было {target})")
+        img = make_result_image("lose", bet)
+        log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Угадай 1/5")
     
-    bot.send_photo(c.message.chat.id, img_buf,
+    bot.send_photo(c.message.chat.id, img,
                   caption=f"Было: {target}\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("snake", mode))
     bot.answer_callback_query(c.id)
@@ -1226,11 +1233,10 @@ def _bj_start(m, uid, bet):
     ph = [deck.pop(), deck.pop()]
     dh = [deck.pop(), deck.pop()]
     BJ[uid] = {"deck": deck, "p": ph, "d": dh, "bet": bet, "cid": m.chat.id}
-    username = uname(m)
     bot.send_message(m.chat.id, f"🃏 Блэкджек (${fmt(bet)})\n\nРаздача...")
     _bj_show(m.chat.id, uid)
 
-def _bj_show(cid, uid, end=False, edit_mid=None):
+def _bj_show(cid, uid, end=False):
     s = BJ.get(uid)
     if not s: return
     ph = s["p"]
@@ -1256,11 +1262,11 @@ def _bj_show(cid, uid, end=False, edit_mid=None):
         username = uname(BJ[uid]['p'] if uid in BJ else '')
         
         if won:
-            img_buf = make_win_image(username, res, "🃏 Блэкджек", uid)
+            img = make_result_image("win", res)
         else:
-            img_buf = make_lose_image(username, res, "🃏 Блэкджек", uid)
+            img = make_result_image("lose", res)
         
-        bot.send_photo(cid, img_buf, caption=f"💰 ${fmt(db.bal(uid))}",
+        bot.send_photo(cid, img, caption=f"💰 ${fmt(db.bal(uid))}",
                       reply_markup=kb_again("blackjack", mode))
 
 def _bj_resolve(uid, pv, dv, bet):
@@ -1354,14 +1360,14 @@ def _slots(m, uid, bet):
     if mult > 0:
         profit = round(bet * mult, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎰 Слоты", uid)
-        log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Слоты (×{mult})")
+        img = make_result_image("win", profit)
+        log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Слоты")
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🎰 Слоты", uid)
+        img = make_result_image("lose", bet)
         log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Слоты")
     
-    bot.send_photo(m.chat.id, img_buf,
+    bot.send_photo(m.chat.id, img,
                   caption=f"| {' | '.join(reels)} |\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("slots", mode))
 
@@ -1417,19 +1423,19 @@ def _rul_spin(msg, uid, bet, choice):
     if won:
         profit = round(bet * mult, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, "🎡 Рулетка", uid)
-        log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Рулетку ({col} {result})")
+        img = make_result_image("win", profit)
+        log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Рулетку")
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, "🎡 Рулетка", uid)
-        log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Рулетку ({col} {result})")
+        img = make_result_image("lose", bet)
+        log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Рулетку")
     
-    bot.send_photo(cid, img_buf,
+    bot.send_photo(cid, img,
                   caption=f"{col} <b>{result}</b>\n💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("roulette", mode))
 
 # ════════════════════════════════════════════
-#  💣 МАЙНС
+#  💣 МАЙНС (РАБОЧИЙ)
 # ════════════════════════════════════════════
 @bot.callback_query_handler(func=lambda c: c.data.startswith("mn_init_"))
 def cb_mn_init(c):
@@ -1439,19 +1445,34 @@ def cb_mn_init(c):
     uid = c.from_user.id
     db.ensure(uid, uname(c))
     
-    # Ждём ставки
-    G[uid] = {"wait": "bet", "game": f"mines_{mines}", "creator": uid}
+    G[uid] = {"wait": "bet", "game": f"mines_{mines}", "creator": uid, "mines": mines}
     bot.answer_callback_query(c.id)
     bot.send_message(c.message.chat.id,
         f"✏️ Введи сумму ставки (мин. 0.15 $):\n"
         f"💰 Баланс: <b>${fmt(db.bal(uid))}</b>\n"
         f"💣 Мин: {mines}")
 
-def _mines_start(m, uid, bet):
-    mines = int(m.text.split("_")[-1]) if "mines_" in str(m) else 5
-    if isinstance(m, str) and "mines_" in m:
-        mines = int(m.split("_")[1])
+@bot.message_handler(func=lambda m: m.from_user.id in G and "mines_" in str(G.get(m.from_user.id, {}).get("game", "")))
+def handle_mines_bet(m):
+    uid = m.from_user.id
+    state = G.pop(uid, None)
+    if not state or state.get("creator") != uid:
+        bot.reply_to(m, "❌ Ошибка")
+        return
     
+    mines = state.get("mines", 5)
+    bet = parse_bet(m.text, uid)
+
+    if not bet or bet < 0.15:
+        bot.reply_to(m, "❌ Минимум 0.15 $. Попробуй снова.")
+        return
+    if not enough(uid, bet):
+        bot.reply_to(m, f"❌ Недостаточно средств. Баланс: ${fmt(db.bal(uid))}")
+        return
+
+    _mines_start(m, uid, bet, mines)
+
+def _mines_start(m, uid, bet, mines=5):
     field = [False] * 25
     for p in random.sample(range(25), mines):
         field[p] = True
@@ -1534,12 +1555,13 @@ def cb_mn_cell(c):
             types.InlineKeyboardButton("🏠 Меню", callback_data=f"back_{s['mode']}"),
         )
         
-        img_buf = make_lose_image(s["username"], s["bet"], f"💣 Майнс", uid)
+        img = make_result_image("lose", s["bet"])
         MN.pop(uid, None)
         
-        bot.send_photo(c.message.chat.id, img_buf,
+        bot.send_photo(c.message.chat.id, img,
                       caption=f"Мина! 💀\n💰 ${fmt(db.bal(uid))}",
                       reply_markup=k)
+        log_to_channel(f"❌ {s['username']} проиграл ${fmt(s['bet'])} в Майнс")
     else:
         s["safe"] += 1
         _mn_show(c.message.chat.id, uid)
@@ -1569,12 +1591,12 @@ def cb_mn_cashout(c):
         types.InlineKeyboardButton("🏠 Меню", callback_data=f"back_{s['mode']}"),
     )
     
-    img_buf = make_win_image(s["username"], profit, "💣 Майнс", uid)
+    img = make_result_image("win", profit)
     
-    bot.send_photo(c.message.chat.id, img_buf,
+    bot.send_photo(c.message.chat.id, img,
                   caption=f"✅ {s['safe']} ×{mult}\n💰 ${fmt(db.bal(uid))}", reply_markup=k)
     
-    log_to_channel(f"✅ {s['username']} выиграл ${fmt(profit)} в Майнс (×{mult})")
+    log_to_channel(f"✅ {s['username']} выиграл ${fmt(profit)} в Майнс")
     bot.answer_callback_query(c.id, f"💸 +${fmt(profit)}!")
 
 # ════════════════════════════════════════════
@@ -1589,7 +1611,8 @@ def _tower_start(m, uid, bet):
         "cid": m.chat.id,
         "active": True,
         "username": username,
-        "mode": mode
+        "mode": mode,
+        "msg_id": None
     }
     
     msg = bot.send_message(m.chat.id, "🏔️ Башня\n\nУровень 0\nНажми ВПЕРЁД!")
@@ -1624,7 +1647,7 @@ def cb_tower(c):
         
         db.record(uid, s["bet"], True, profit)
         
-        img_buf = make_win_image(s["username"], profit, f"🏔️ Башня", uid)
+        img = make_result_image("win", profit)
         
         k = types.InlineKeyboardMarkup(row_width=2)
         k.add(
@@ -1632,7 +1655,7 @@ def cb_tower(c):
             types.InlineKeyboardButton("🏠 Меню", callback_data=f"back_{s['mode']}"),
         )
         
-        bot.send_photo(c.message.chat.id, img_buf,
+        bot.send_photo(c.message.chat.id, img,
                       caption=f"🏔️ Уровень {level}\n×{mult:.1f}\n💰 ${fmt(db.bal(uid))}",
                       reply_markup=k)
         
@@ -1660,8 +1683,8 @@ def cb_tower(c):
                 types.InlineKeyboardButton("🔄 Снова", callback_data="g_tower"),
                 types.InlineKeyboardButton("🏠 Меню", callback_data=f"back_{s['mode']}"),
             )
-            img_buf = make_lose_image(s["username"], s["bet"], "🏔️ Башня", uid)
-            bot.send_photo(c.message.chat.id, img_buf,
+            img = make_result_image("lose", s["bet"])
+            bot.send_photo(c.message.chat.id, img,
                           caption=f"💀 Упал!\n💰 ${fmt(db.bal(uid))}", reply_markup=k)
             TOWER.pop(uid, None)
             bot.answer_callback_query(c.id, "💀 Упал!")
@@ -1675,8 +1698,8 @@ def cb_tower(c):
                 types.InlineKeyboardButton("🔄 Снова", callback_data="g_tower"),
                 types.InlineKeyboardButton("🏠 Меню", callback_data=f"back_{s['mode']}"),
             )
-            img_buf = make_lose_image(s["username"], -profit, "🏔️ Башня", uid)
-            bot.send_photo(c.message.chat.id, img_buf,
+            img = make_result_image("lose", profit)
+            bot.send_photo(c.message.chat.id, img,
                           caption=f"💀 Упал на уровне {level}!\nПоловина выигрыша!\n💰 ${fmt(db.bal(uid))}",
                           reply_markup=k)
             TOWER.pop(uid, None)
@@ -1690,13 +1713,13 @@ def cb_tower(c):
     k.add(types.InlineKeyboardButton("⬆️ ВПЕРЁД", callback_data=f"twr_{uid}"))
     k.add(types.InlineKeyboardButton("💸 ЗАБРАТЬ", callback_data=f"twr_cash_{uid}"))
     
-    try:
-        bot.edit_message_text(
-            f"🏔️ Башня\nУровень {s['level']}\n×{mult:.1f}",
-            c.message.chat.id, s.get("msg_id", c.message.message_id), reply_markup=k)
-    except:
-        bot.send_message(c.message.chat.id,
-            f"🏔️ Башня\nУровень {s['level']}\n×{mult:.1f}", reply_markup=k)
+    if s.get("msg_id"):
+        try:
+            bot.edit_message_text(
+                f"🏔️ Башня\nУровень {s['level']}\n×{mult:.1f}",
+                c.message.chat.id, s["msg_id"], reply_markup=k)
+        except:
+            pass
     
     bot.answer_callback_query(c.id, f"⬆️ Уровень {s['level']}!")
 
@@ -1740,9 +1763,7 @@ def _crash_run(m, uid, bet):
     username = uname(m)
     mode = db.get_mode(uid)
     
-    msg = bot.send_message(cid,
-        f"<b>🚀 КРАШ</b>  ${fmt(bet)}\n\n"
-        f"📈 ×{mult:.2f}\n\nНажми ВЫВЕСТИ!")
+    msg = bot.send_message(cid, f"🚀 КРАШ ${fmt(bet)}\n\n📈 ×{mult:.2f}\n\nНажми ВЫВЕСТИ!")
     
     k = types.InlineKeyboardMarkup()
     k.add(types.InlineKeyboardButton("💸 ВЫВЕСТИ", callback_data=f"cr_out_{uid}_{msg.message_id}"))
@@ -1768,7 +1789,7 @@ def _crash_run(m, uid, bet):
                 if not state or state["cashed"]: return
                 
                 db.record(uid, bet, False)
-                img_buf = make_lose_image(state["username"], bet, f"🚀 Краш", uid)
+                img = make_result_image("lose", bet)
                 
                 kb2 = types.InlineKeyboardMarkup(row_width=2)
                 kb2.add(
@@ -1777,11 +1798,8 @@ def _crash_run(m, uid, bet):
                 )
                 
                 try:
-                    bot.edit_message_text(
-                        f"💥 Краш на ×{crash}!",
-                        cid, msg.message_id)
-                    bot.send_photo(cid, img_buf,
-                                  caption=f"💰 ${fmt(db.bal(uid))}", reply_markup=kb2)
+                    bot.edit_message_text(f"💥 Краш на ×{crash}!", cid, msg.message_id)
+                    bot.send_photo(cid, img, caption=f"💰 ${fmt(db.bal(uid))}", reply_markup=kb2)
                 except:
                     pass
                 
@@ -1790,8 +1808,7 @@ def _crash_run(m, uid, bet):
             
             try:
                 bot.edit_message_text(
-                    f"<b>🚀 КРАШ</b>  ${fmt(bet)}\n\n"
-                    f"📈 <b>×{mult:.2f}</b>\n\nНажми ВЫВЕСТИ!",
+                    f"🚀 КРАШ ${fmt(bet)}\n\n📈 <b>×{mult:.2f}</b>\n\nНажми ВЫВЕСТИ!",
                     cid, msg.message_id, reply_markup=k)
             except: pass
 
@@ -1819,7 +1836,7 @@ def cb_crash_out(c):
     
     db.record(uid, bet, True, profit)
     
-    img_buf = make_win_image(s["username"], profit, f"🚀 Краш", uid)
+    img = make_result_image("win", profit)
     
     kb2 = types.InlineKeyboardMarkup(row_width=2)
     kb2.add(
@@ -1828,14 +1845,10 @@ def cb_crash_out(c):
     )
     
     try:
-        bot.edit_message_text(
-            f"🚀 Вывод ×{mult:.2f}!",
-            s["cid"], s["mid"])
-        bot.send_photo(s["cid"], img_buf,
-                      caption=f"💰 ${fmt(db.bal(uid))}", reply_markup=kb2)
+        bot.edit_message_text(f"🚀 Вывод ×{mult:.2f}!", s["cid"], s["mid"])
+        bot.send_photo(s["cid"], img, caption=f"💰 ${fmt(db.bal(uid))}", reply_markup=kb2)
     except:
-        bot.send_photo(s["cid"], img_buf,
-                      caption=f"🚀 ×{mult:.2f}\n💰 ${fmt(db.bal(uid))}", reply_markup=kb2)
+        bot.send_photo(s["cid"], img, caption=f"🚀 ×{mult:.2f}\n💰 ${fmt(db.bal(uid))}", reply_markup=kb2)
     
     log_to_channel(f"✅ {s['username']} выиграл ${fmt(profit)} в Краш")
     bot.answer_callback_query(c.id, f"💸 ×{mult:.2f}!")
@@ -1856,7 +1869,6 @@ def _trader(m, uid, bet):
         types.InlineKeyboardButton("📉 SHORT", callback_data=f"tr_{uid}_down"),
     )
     
-    username = uname(m)
     bot.send_message(m.chat.id, f"📈 {coin} = ${fmt(price)}\n\nКуда пойдёт цена?", reply_markup=k)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("tr_"))
@@ -1894,16 +1906,16 @@ def cb_trader(c):
     if correct:
         profit = round(bet * 0.9, 2)
         db.record(uid, bet, True, profit)
-        img_buf = make_win_image(username, profit, f"📈 {coin}", uid)
+        img = make_result_image("win", profit)
         log_to_channel(f"✅ {username} выиграл ${fmt(profit)} в Трейдер")
     else:
         db.record(uid, bet, False)
-        img_buf = make_lose_image(username, bet, f"📈 {coin}", uid)
+        img = make_result_image("lose", bet)
         log_to_channel(f"❌ {username} проиграл ${fmt(bet)} в Трейдер")
     
     arrow = "📈" if went_up else "📉"
-    bot.send_photo(c.message.chat.id, img_buf,
-                  caption=f"{arrow} ${fmt(old_p)} → ${fmt(new_p)} ({'+' if went_up else '-'}{pct}%)\n"
+    bot.send_photo(c.message.chat.id, img,
+                  caption=f"{arrow} ${fmt(old_p)} → ${fmt(new_p)}\n({'+' if went_up else '-'}{pct}%)\n"
                          f"💰 ${fmt(db.bal(uid))}",
                   reply_markup=kb_again("trader", mode))
 
@@ -1967,16 +1979,15 @@ def cmd_stats(m):
         f"📊 Прибыль: <b>{sign}${fmt(profit)}</b>")
 
 # ════════════════════════════════════════════
-#  💰 ПОПОЛНЕНИЕ
+#  💰 ПОПОЛНЕНИЕ / ВЫВОД
 # ════════════════════════════════════════════
 @bot.message_handler(func=lambda m: m.text == "💰 Пополнение")
 def cmd_deposit(m):
     k = types.InlineKeyboardMarkup()
     k.add(types.InlineKeyboardButton("💳 Пополнить", url=CRYPTO_LINK))
-    bot.send_message(m.chat.id,
-        f"<b>💰 Пополни счёт</b>\n\n"
-        f"Нажми кнопку ниже и выбери сумму.\n"
-        f"Криптовалюта поступит мгновенно!", reply_markup=k)
+    
+    img = make_result_image("deposit", 100)
+    bot.send_photo(m.chat.id, img, caption="Нажми кнопку для пополнения!", reply_markup=k)
 
 # ════════════════════════════════════════════
 #  ℹ️ ПОМОЩЬ
@@ -1985,23 +1996,21 @@ def cmd_deposit(m):
 def cmd_help(m):
     bot.send_message(m.chat.id,
         f"<b>ℹ️ {CASINO_NAME}</b>\n\n"
-        f"<b>🎮 Игры:</b>\n"
-        f"🎲 Кости · 🪙 Монетка\n"
-        f"⚽ Футбол · 🏀 Баскет · 🎯 Дартс · 🎳 Боулинг\n"
-        f"🐍 Угадай 1/5 · ⚔️ PvP Дуэль\n"
+        f"<b>🎮 Режимы:</b>\n"
+        f"🐸 <b>BrainRot</b> — без баланса, весёлый\n"
+        f"💎 <b>Crypto</b> — с реальным балансом\n\n"
+        f"<b>🐸 BrainRot Игры:</b>\n"
+        f"🎲 Кости · 🪙 Монетка · ⚽ Футбол\n"
+        f"🏀 Баскет · 🎯 Дартс · 🎳 Боулинг\n"
+        f"🐍 Угадай 1/5 · ⚔️ PvP Дуэль\n\n"
+        f"<b>💎 Crypto Игры:</b>\n"
         f"🃏 Блэкджек · 🎰 Слоты · 🎡 Рулетка\n"
-        f"💣 Майнс · 🏔️ Башня\n"
-        f"🚀 Краш · 📈 Трейдер\n\n"
-        f"<b>💡 Советы:</b>\n"
-        f"• Минимальная ставка: 0.15 $\n"
-        f"• BrainRot: без баланса\n"
-        f"• Crypto: с реальным балансом\n"
-        f"• PvP работает в обоих режимах\n\n"
-        f"<b>💰 Пополнение:</b>\n"
-        f"Нажми «Пополнение» в меню")
+        f"💣 Майнс · 🏔️ Башня · 🚀 Краш\n"
+        f"📈 Трейдер\n\n"
+        f"<b>💡 Минимальная ставка: 0.15$</b>")
 
 # ════════════════════════════════════════════
-#  👑 МОДЕРАТОР — ПО ЮЗЕРНЕЙМУ
+#  👑 МОДЕРАТОР
 # ════════════════════════════════════════════
 @bot.message_handler(commands=['modgive'])
 def mod_give(m):
@@ -2010,27 +2019,26 @@ def mod_give(m):
     try:
         parts = m.text.split()
         if len(parts) < 3:
-            bot.reply_to(m, "Формат: /modgive @username СУММА или /modgive ID СУММА")
+            bot.reply_to(m, "Формат: /modgive @username СУММА")
             return
         
         identifier = parts[1]
         amt = float(parts[2])
         
-        # Если передан юзернейм с @
         if identifier.startswith("@"):
             uid = db.get_by_username(identifier)
             if not uid:
-                bot.reply_to(m, f"❌ Пользователь {identifier} не найден")
+                bot.reply_to(m, f"❌ {identifier} не найден")
                 return
         else:
             uid = int(identifier)
         
         db.ensure(uid)
         db.add(uid, amt)
-        log_to_channel(f"💰 Модератор @{m.from_user.username} выдал ${fmt(amt)} пользователю {identifier}")
-        bot.reply_to(m, f"✅ Выдано ${fmt(amt)} пользователю")
+        log_to_channel(f"💰 Модератор выдал ${fmt(amt)} пользователю {identifier}")
+        bot.reply_to(m, f"✅ Выдано ${fmt(amt)}")
     except Exception as e:
-        bot.reply_to(m, f"❌ Ошибка: {e}\nФормат: /modgive @username СУММА")
+        bot.reply_to(m, f"❌ Ошибка: {e}")
 
 @bot.message_handler(commands=['modset'])
 def mod_set(m):
@@ -2039,7 +2047,7 @@ def mod_set(m):
     try:
         parts = m.text.split()
         if len(parts) < 3:
-            bot.reply_to(m, "Формат: /modset @username СУММА или /modset ID СУММА")
+            bot.reply_to(m, "Формат: /modset @username СУММА")
             return
         
         identifier = parts[1]
@@ -2048,17 +2056,17 @@ def mod_set(m):
         if identifier.startswith("@"):
             uid = db.get_by_username(identifier)
             if not uid:
-                bot.reply_to(m, f"❌ Пользователь {identifier} не найден")
+                bot.reply_to(m, f"❌ {identifier} не найден")
                 return
         else:
             uid = int(identifier)
         
         db.ensure(uid)
         db.set_bal(uid, amt)
-        log_to_channel(f"💰 Модератор @{m.from_user.username} установил баланс ${fmt(amt)} пользователю {identifier}")
+        log_to_channel(f"💰 Модератор установил ${fmt(amt)} пользователю {identifier}")
         bot.reply_to(m, f"✅ Баланс = ${fmt(amt)}")
     except Exception as e:
-        bot.reply_to(m, f"❌ Ошибка: {e}\nФормат: /modset @username СУММА")
+        bot.reply_to(m, f"❌ Ошибка: {e}")
 
 @bot.message_handler(commands=['modstats'])
 def mod_stats(m):
@@ -2068,9 +2076,9 @@ def mod_stats(m):
     r = db.cur.fetchone()
     bot.reply_to(m,
         f"<b>📊 КАЗИНО СТАТИСТИКА</b>\n\n"
-        f"👥 Игроков: <b>{r[0]}</b>\n"
+        f"👥 Игроков: <b>{r[0] or 0}</b>\n"
         f"💰 Всего баланса: <b>${fmt(r[1] or 0)}</b>\n"
-        f"🎮 Всего игр: <b>{r[2]}</b>\n"
+        f"🎮 Всего игр: <b>{r[2] or 0}</b>\n"
         f"💸 Оборот: <b>${fmt(r[3] or 0)}</b>")
 
 # ════════════════════════════════════════════
@@ -2081,7 +2089,7 @@ def cb_noop(c):
     bot.answer_callback_query(c.id)
 
 # ════════════════════════════════════════════
-#  FLASK (Render)
+#  🌐 FLASK (Render keep-alive)
 # ════════════════════════════════════════════
 def run_flask():
     app = Flask(__name__)
@@ -2095,10 +2103,10 @@ def run_flask():
         return {"status": "ok"}
 
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port, threaded=True)
+    app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
 
 # ════════════════════════════════════════════
-#  ЗАПУСК
+#  🚀 ЗАПУСК
 # ════════════════════════════════════════════
 if __name__ == "__main__":
     logger.info(f"🎰 {CASINO_NAME} — ЗАПУСК")
